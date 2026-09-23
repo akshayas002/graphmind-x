@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: graphmind-neo4j
+    ports:
+      - "7474:7474"   # Neo4j Browser (web UI)
+      - "7687:7687"   # Bolt protocol (driver connections)
+    environment:
+      - NEO4J_AUTH=neo4j/graphmindpass
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_memory_heap_max__size=1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+
+volumes:
+  neo4j_data:
+  neo4j_logs:

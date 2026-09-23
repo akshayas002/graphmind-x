@@ -1,0 +1,21 @@
+# --- Week 1: Data ingestion + entity extraction + graph DB ---
+requests>=2.31.0
+python-dotenv>=1.0.0
+neo4j>=5.20.0
+spacy>=3.7.0
+tenacity>=8.2.0
+tqdm>=4.66.0
+pydantic>=2.6.0
+pytest>=8.0.0
+
+# --- Later weeks (agents, RL, API, UI) — leave commented until needed ---
+# fastapi>=0.110.0
+# uvicorn>=0.29.0
+# streamlit>=1.32.0
+# pyvis>=0.3.2
+# sentence-transformers>=2.6.0
+# torch>=2.2.0
+# numpy>=1.26.0
+# scikit-learn>=1.4.0
+
+# After installing, run: python -m spacy download en_core_web_sm
