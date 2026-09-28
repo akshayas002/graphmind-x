@@ -1,25 +1,28 @@
 """
-CLI entry point for Phase 2/3: run a question through the full
-Planner -> Explorer -> Verifier -> Synthesizer pipeline and print the
-answer plus a step-by-step trace.
+CLI entry point: run a question through the full pipeline.
 
 Usage:
     python -m src.main "Who invented the sulphide rich composite battery?"
+    python -m src.main --rl "Who invented the sulphide rich composite battery?"
+        (uses the trained RL router instead of the fixed static sequence —
+        requires data/rl/q_table.json; train it first with
+        python -m src.rl.train --simulate)
 """
-import sys
-
+import argparse
 from src.orchestrator import Orchestrator
 
 
 def main():
-    if len(sys.argv) < 2:
-        print('Usage: python -m src.main "your question here"')
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Ask a question against the GraphMind-X pipeline.")
+    parser.add_argument("question", nargs="+")
+    parser.add_argument("--rl", action="store_true", help="Use the trained RL router instead of the static sequence")
+    parser.add_argument("--q-table-path", default=None)
+    args = parser.parse_args()
 
-    question = " ".join(sys.argv[1:])
+    question = " ".join(args.question)
     print(f"Question: {question}\n")
 
-    orchestrator = Orchestrator()
+    orchestrator = Orchestrator(use_rl_router=args.rl, q_table_path=args.q_table_path)
     try:
         result = orchestrator.answer(question)
     finally:

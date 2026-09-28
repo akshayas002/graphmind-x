@@ -1,19 +1,28 @@
 """
-Week 2: Graph Explorer agent.
+Week 2/RL: Graph Explorer agent.
 
-Turns a sub-question into a Cypher query (grounded in the live graph schema,
-not a hardcoded assumption), runs it through the safety validator, and
-executes it against Neo4j. Every failure mode — LLM unreachable, unparseable
-output, rejected Cypher, Neo4j execution error — produces an ExplorerOutput
-with `error` set rather than raising, so the orchestrator never crashes
-partway through a multi-sub-question plan.
+explore_once() is a SINGLE attempt — no internal retry — so that whichever
+caller is in charge of retry decisions (the static orchestrator's fixed
+one-retry policy, or the RL router's learned policy) is the only place that
+decides. Nesting an automatic retry inside explore_once() itself would let
+one RL "EXPLORE" action silently trigger two LLM calls behind the router's
+back, corrupting its retries_used state and reward accounting — exactly the
+kind of bug that's invisible until you look at training data. explore()
+below is a thin, backward-compatible wrapper providing the original
+fixed one-retry behavior for the static (non-RL) orchestrator.
 """
 from src.agents.base_agent import BaseAgent
 from src.agents.models import ExplorerOutput, SubQuestion
-from src.agents.prompts import GRAPH_EXPLORER_PROMPT
+from src.agents.prompts import GRAPH_EXPLORER_PROMPT, GRAPH_EXPLORER_RETRY_PROMPT
 from src.graph.cypher_validator import sanitize_and_validate
 from src.graph.neo4j_client import Neo4jClient
 from src import config
+
+
+def _format_relationship_patterns(patterns: list[dict]) -> str:
+    if not patterns:
+        return "(none found — graph may be empty)"
+    return "\n".join(f"  ({p['from']})-[:{p['type']}]->({p['to']})" for p in patterns)
 
 
 class GraphExplorerAgent(BaseAgent):
@@ -21,14 +30,53 @@ class GraphExplorerAgent(BaseAgent):
         super().__init__(llm_client)
         self.neo4j_client = neo4j_client
 
-    def explore(self, sub_question: SubQuestion, schema: dict) -> ExplorerOutput:
-        prompt = GRAPH_EXPLORER_PROMPT.format(
-            labels=", ".join(schema.get("labels", [])),
-            relationship_types=", ".join(schema.get("relationship_types", [])),
-            label_properties=schema.get("label_properties", {}),
-            question=sub_question.text,
-        )
+    def explore_once(
+        self, sub_question: SubQuestion, schema: dict, previous_cypher: str | None = None
+    ) -> ExplorerOutput:
+        """
+        A single Cypher-generation-and-execution attempt. Pass previous_cypher
+        to get the "broaden your query" retry prompt instead of the initial
+        prompt — the caller (static orchestrator or RL router) decides when
+        that's appropriate, this method just executes one attempt either way.
+        """
+        labels_str = ", ".join(schema.get("labels", []))
+        rel_patterns_str = _format_relationship_patterns(schema.get("relationship_patterns", []))
+        label_properties = schema.get("label_properties", {})
 
+        if previous_cypher is None:
+            prompt = GRAPH_EXPLORER_PROMPT.format(
+                labels=labels_str,
+                relationship_patterns=rel_patterns_str,
+                label_properties=label_properties,
+                question=sub_question.text,
+            )
+        else:
+            prompt = GRAPH_EXPLORER_RETRY_PROMPT.format(
+                previous_cypher=previous_cypher,
+                labels=labels_str,
+                relationship_patterns=rel_patterns_str,
+                label_properties=label_properties,
+                question=sub_question.text,
+            )
+
+        return self._generate_and_run(sub_question, prompt)
+
+    def explore(self, sub_question: SubQuestion, schema: dict) -> ExplorerOutput:
+        """
+        Backward-compatible wrapper for the static (non-RL) orchestrator:
+        one attempt, and if it executes cleanly but finds zero rows, exactly
+        one retry with the broadened prompt.
+        """
+        result = self.explore_once(sub_question, schema)
+
+        if result.error is None and result.row_count == 0:
+            retry_result = self.explore_once(sub_question, schema, previous_cypher=result.cypher)
+            if retry_result.error is None and retry_result.row_count > 0:
+                return retry_result
+
+        return result
+
+    def _generate_and_run(self, sub_question: SubQuestion, prompt: str) -> ExplorerOutput:
         raw = self._call_llm(prompt)
         if raw is None:
             return ExplorerOutput(

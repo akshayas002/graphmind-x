@@ -1,6 +1,5 @@
 """
-All LLM prompt templates in one place — easier to tune against your actual
-local model's quirks without hunting through agent logic.
+All LLM prompt templates in one place.
 """
 
 PLANNER_PROMPT = """You are a query planner for a patent knowledge graph system.
@@ -22,7 +21,11 @@ User question: {question}
 GRAPH_EXPLORER_PROMPT = """You are a Cypher query generator for a Neo4j graph database.
 
 The graph has these node labels: {labels}
-Relationship types: {relationship_types}
+
+Relationships that actually exist in the data (direction matters — use these exactly,
+do not guess or invert direction/type):
+{relationship_patterns}
+
 Example properties per label: {label_properties}
 
 Write ONE read-only Cypher query (MATCH ... RETURN ...) that answers this question:
@@ -30,8 +33,35 @@ Write ONE read-only Cypher query (MATCH ... RETURN ...) that answers this questi
 
 Rules:
 - Only use MATCH and RETURN. Never use CREATE, MERGE, DELETE, SET, REMOVE, DROP, or CALL.
-- Only reference the labels, relationship types, and properties listed above.
+- Only reference the labels and relationships listed above, with the exact direction shown.
+- Never guess or invent an `id` value (e.g. from words in the question). IDs are not
+  derived from titles. To find a specific patent by name, match on title text instead:
+  WHERE toLower(p.title) CONTAINS toLower('some keyword')
+- Prefer partial/case-insensitive text matching (toLower(...) CONTAINS toLower(...))
+  over exact equality whenever matching against a name or title.
 - Return only the Cypher query, wrapped in a ```cypher code block. No explanation.
+"""
+
+GRAPH_EXPLORER_RETRY_PROMPT = """Your previous Cypher query ran successfully but returned
+ZERO results, which likely means it was too strict (e.g. exact match instead of partial
+match, or an assumed id/property value that doesn't actually exist).
+
+Previous query:
+{previous_cypher}
+
+Same graph schema as before:
+Node labels: {labels}
+Relationships (direction matters): {relationship_patterns}
+Example properties per label: {label_properties}
+
+Question: "{question}"
+
+Write a BROADER read-only Cypher query that's more likely to find a match — use
+toLower(...) CONTAINS toLower(...) for any text matching, and double-check relationship
+direction against the list above. Same rules as before (read-only, only listed
+labels/relationships, no invented id values).
+
+Return only the Cypher query, wrapped in a ```cypher code block. No explanation.
 """
 
 VERIFIER_PROMPT = """You are checking whether graph query results plausibly answer a question.
