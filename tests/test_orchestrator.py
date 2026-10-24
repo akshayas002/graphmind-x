@@ -25,7 +25,12 @@ def test_orchestrator_full_happy_path():
 
     fake_neo4j = FakeNeo4jClient(
         records=[{"i.name": "Jane Doe", "p.title": "Sulphide rich composite battery"}],
-        schema={"labels": ["Patent", "Inventor"], "relationship_types": ["INVENTED"], "label_properties": {}},
+                schema={
+            "labels": ["Patent", "Inventor"],
+            "relationship_types": ["INVENTED"],
+            "relationship_patterns": [{"from": "Inventor", "type": "INVENTED", "to": "Patent"}],
+            "label_properties": {},
+        },
     )
     orch = Orchestrator(llm_client=RoutingFakeLLM(), neo4j_client=fake_neo4j)
     result = orch.answer("Who invented the sulphide-rich composite battery patent?")

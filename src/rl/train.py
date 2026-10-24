@@ -17,8 +17,8 @@ from src.rl.logger import TransitionLogger
 from src.rl.q_learning import QLearningAgent
 from src.rl.simulated_agents import SimulatedExplorer, SimulatedVerifier
 from src import config
+from src.rl.simulated_agents import SCENARIOS as DEFAULT_SIMULATED_SCENARIOS
 
-DEFAULT_SIMULATED_SCENARIOS = ["easy", "needs_one_retry", "unrecoverable"]
 DEFAULT_REAL_QUESTIONS = [
     "Who invented the sulphide rich composite battery patent?",
     "Which company owns the most patents in this graph?",

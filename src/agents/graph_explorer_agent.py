@@ -2,21 +2,28 @@
 Week 2/RL: Graph Explorer agent.
 
 explore_once() is a SINGLE attempt — no internal retry — so that whichever
-caller is in charge of retry decisions (the static orchestrator's fixed
-one-retry policy, or the RL router's learned policy) is the only place that
-decides. Nesting an automatic retry inside explore_once() itself would let
-one RL "EXPLORE" action silently trigger two LLM calls behind the router's
-back, corrupting its retries_used state and reward accounting — exactly the
-kind of bug that's invisible until you look at training data. explore()
-below is a thin, backward-compatible wrapper providing the original
-fixed one-retry behavior for the static (non-RL) orchestrator.
+caller owns retry decisions (the static orchestrator's fixed one-retry policy,
+or the RL router's learned policy) is the only place that decides.
+
+Every generated query goes through two deterministic gates before it can reach
+Neo4j: the read-only safety validator, then a schema check that auto-flips
+reversed relationship arrows and rejects labels/relationships that don't
+exist (see src/graph/cypher_schema.py). A schema rejection costs no database
+call and its message is fed back to the model on retry.
 """
 from src.agents.base_agent import BaseAgent
 from src.agents.models import ExplorerOutput, SubQuestion
 from src.agents.prompts import GRAPH_EXPLORER_PROMPT, GRAPH_EXPLORER_RETRY_PROMPT
+from src.graph.cypher_schema import check_and_fix
 from src.graph.cypher_validator import sanitize_and_validate
 from src.graph.neo4j_client import Neo4jClient
 from src import config
+
+ZERO_ROWS_REASON = (
+    "It ran successfully but returned ZERO results, which likely means it was too strict "
+    "(e.g. exact match instead of partial match, an assumed id/property value that doesn't "
+    "exist, or a relationship written in the wrong direction)."
+)
 
 
 def _format_relationship_patterns(patterns: list[dict]) -> str:
@@ -31,13 +38,16 @@ class GraphExplorerAgent(BaseAgent):
         self.neo4j_client = neo4j_client
 
     def explore_once(
-        self, sub_question: SubQuestion, schema: dict, previous_cypher: str | None = None
+        self,
+        sub_question: SubQuestion,
+        schema: dict,
+        previous_cypher: str | None = None,
+        previous_error: str | None = None,
     ) -> ExplorerOutput:
         """
-        A single Cypher-generation-and-execution attempt. Pass previous_cypher
-        to get the "broaden your query" retry prompt instead of the initial
-        prompt — the caller (static orchestrator or RL router) decides when
-        that's appropriate, this method just executes one attempt either way.
+        One Cypher-generation-and-execution attempt. Pass previous_cypher (and
+        optionally previous_error) to use the corrective retry prompt; the
+        caller decides when that's appropriate.
         """
         labels_str = ", ".join(schema.get("labels", []))
         rel_patterns_str = _format_relationship_patterns(schema.get("relationship_patterns", []))
@@ -53,30 +63,34 @@ class GraphExplorerAgent(BaseAgent):
         else:
             prompt = GRAPH_EXPLORER_RETRY_PROMPT.format(
                 previous_cypher=previous_cypher,
+                failure_reason=previous_error or ZERO_ROWS_REASON,
                 labels=labels_str,
                 relationship_patterns=rel_patterns_str,
                 label_properties=label_properties,
                 question=sub_question.text,
             )
 
-        return self._generate_and_run(sub_question, prompt)
+        return self._generate_and_run(sub_question, prompt, schema)
 
     def explore(self, sub_question: SubQuestion, schema: dict) -> ExplorerOutput:
         """
-        Backward-compatible wrapper for the static (non-RL) orchestrator:
-        one attempt, and if it executes cleanly but finds zero rows, exactly
-        one retry with the broadened prompt.
+        Backward-compatible wrapper for the static (non-RL) orchestrator: one
+        attempt, and if it produced no rows (zero results, schema rejection, or
+        a Neo4j error — anything except the LLM being unreachable), exactly one
+        corrective retry.
         """
         result = self.explore_once(sub_question, schema)
 
-        if result.error is None and result.row_count == 0:
-            retry_result = self.explore_once(sub_question, schema, previous_cypher=result.cypher)
+        if result.row_count == 0 and result.cypher is not None:
+            retry_result = self.explore_once(
+                sub_question, schema, previous_cypher=result.cypher, previous_error=result.error
+            )
             if retry_result.error is None and retry_result.row_count > 0:
                 return retry_result
 
         return result
 
-    def _generate_and_run(self, sub_question: SubQuestion, prompt: str) -> ExplorerOutput:
+    def _generate_and_run(self, sub_question: SubQuestion, prompt: str, schema: dict) -> ExplorerOutput:
         raw = self._call_llm(prompt)
         if raw is None:
             return ExplorerOutput(
@@ -92,6 +106,15 @@ class GraphExplorerAgent(BaseAgent):
                 cypher=raw.strip(),
                 error=f"Generated Cypher was rejected: {reject_reason}",
             )
+
+        schema_result = check_and_fix(safe_cypher, schema)
+        if schema_result.error is not None:
+            return ExplorerOutput(
+                sub_question_id=sub_question.id,
+                cypher=safe_cypher,
+                error=f"Generated Cypher doesn't match the graph schema: {schema_result.error}",
+            )
+        safe_cypher = schema_result.cypher  # may have had reversed arrows flipped
 
         try:
             records = self.neo4j_client.run_read_query(safe_cypher)

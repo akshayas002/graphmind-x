@@ -1,15 +1,13 @@
 """
 Week 1, Step: load extracted nodes/edges into Neo4j.
-
-Everything uses MERGE (not CREATE), so re-running this on the same or
-overlapping data is safe and idempotent — important since you'll re-run
-ingestion weekly once continuous data refresh (Week 5+) comes online.
+Everything uses MERGE (not CREATE), so re-running this is safe and idempotent.
 
 Usage:
-    python -m src.graph.neo4j_client data/processed/uspto_..._graph.json
+    python -m src.graph.neo4j_client data/processed/..._graph.json
 """
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -17,6 +15,8 @@ from neo4j import GraphDatabase
 from tqdm import tqdm
 
 from src import config
+
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 
 class Neo4jClient:
@@ -30,21 +30,15 @@ class Neo4jClient:
         self.driver.verify_connectivity()
 
     def ensure_constraints(self):
-        """One uniqueness constraint per label, so MERGE stays fast as the graph grows."""
         labels = ["Patent", "Inventor", "Applicant", "ClassificationCode", "Concept"]
         with self.driver.session() as session:
             for label in labels:
-                session.run(
-                    f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
-                )
+                session.run(f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE")
 
     def load_nodes(self, nodes: list[dict]):
-        # Grouped by label so each MERGE has a static label (Cypher labels can't be
-        # parameterized directly) — no APOC dependency needed for this simple case.
         by_label: dict[str, list[dict]] = {}
         for n in nodes:
             by_label.setdefault(n["label"], []).append(n)
-
         with self.driver.session() as session:
             for label, group in by_label.items():
                 session.run(
@@ -61,7 +55,6 @@ class Neo4jClient:
         for e in edges:
             key = (e["start_label"], e["type"], e["end_label"])
             by_shape.setdefault(key, []).append(e)
-
         with self.driver.session() as session:
             for (start_label, rel_type, end_label), group in tqdm(by_shape.items(), desc="Loading edges"):
                 session.run(
@@ -77,11 +70,7 @@ class Neo4jClient:
     def summary(self):
         with self.driver.session() as session:
             result = session.run(
-                """
-                MATCH (n)
-                RETURN labels(n)[0] AS label, count(n) AS count
-                ORDER BY count DESC
-                """
+                "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count ORDER BY count DESC"
             )
             return [(r["label"], r["count"]) for r in result]
 
@@ -89,9 +78,7 @@ class Neo4jClient:
         """
         Execute an already-validated read-only Cypher query and return records
         as plain dicts. Callers (Graph Explorer agent) are responsible for
-        running the query through src.graph.cypher_validator first — this
-        method does not re-validate, so never call it directly with
-        unvalidated LLM-generated Cypher.
+        running the query through src.graph.cypher_validator first.
         """
         with self.driver.session() as session:
             result = session.run(cypher, parameters or {})
@@ -101,8 +88,10 @@ class Neo4jClient:
         """
         Introspect the live graph so agents can ground Cypher generation in
         what's actually in the database, rather than a hardcoded assumption
-        that can drift out of sync (exactly the kind of mismatch that bit
-        the Week 1 extractor once already).
+        that can drift out of sync. This is the piece that must be present
+        for src/graph/cypher_schema.py to flip reversed relationship arrows
+        and catch invented/nonexistent relationships — without
+        relationship_patterns here, that whole safety layer is blind.
         """
         with self.driver.session() as session:
             labels = [r["label"] for r in session.run("CALL db.labels() YIELD label RETURN label")]
@@ -110,9 +99,7 @@ class Neo4jClient:
                 r["relationshipType"]
                 for r in session.run("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")
             ]
-            # Sample a few property keys per label so the prompt has concrete examples
-            # to work with, without dumping the entire property-key list (which can be
-            # large and mostly irrelevant to any one question).
+
             label_properties: dict[str, list[str]] = {}
             for label in labels:
                 try:
@@ -124,9 +111,25 @@ class Neo4jClient:
                 except Exception:
                     label_properties[label] = []
 
+            relationship_patterns: list[dict] = []
+            try:
+                rows = session.run(
+                    """
+                    MATCH (a)-[r]->(b)
+                    RETURN DISTINCT labels(a)[0] AS from_label, type(r) AS rel_type, labels(b)[0] AS to_label
+                    LIMIT 50
+                    """
+                )
+                relationship_patterns = [
+                    {"from": r["from_label"], "type": r["rel_type"], "to": r["to_label"]} for r in rows
+                ]
+            except Exception:
+                pass
+
         return {
             "labels": labels,
             "relationship_types": rel_types,
+            "relationship_patterns": relationship_patterns,
             "label_properties": label_properties,
         }
 
@@ -150,15 +153,12 @@ def main():
         client.verify_connectivity()
     except Exception as e:
         print(f"Could not connect to Neo4j at {config.NEO4J_URI}: {e}")
-        print("Is the container running? Try: docker compose up -d")
         sys.exit(1)
 
     print("Ensuring uniqueness constraints...")
     client.ensure_constraints()
-
     print(f"Loading {len(payload['nodes'])} nodes...")
     client.load_nodes(payload["nodes"])
-
     print(f"Loading {len(payload['edges'])} edges...")
     client.load_edges(payload["edges"])
 
@@ -168,7 +168,6 @@ def main():
 
     client.close()
     print("\nDone. Open http://localhost:7474 (Neo4j Browser) to explore the graph visually.")
-    print('Try: MATCH (p:Patent)-[:CLASSIFIED_AS]->(c:ClassificationCode) RETURN p, c LIMIT 50')
 
 
 if __name__ == "__main__":

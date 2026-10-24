@@ -1,57 +1,112 @@
 {
   "('start', 'none', False, 0, 'unknown')": {
-    "EXPLORE": 0.1491221659756476
+    "EXPLORE": 0.21798792682427376
   },
   "('after_explore', 'many', False, 0, 'unknown')": {
-    "EXPLORE": 0.4759807474992705,
-    "REJECT": -0.31241903615999994,
-    "VERIFY": 0.804999371935267
-  },
-  "('after_explore', 'many', False, 1, 'unknown')": {
-    "VERIFY": 0.8049393814397038,
-    "EXPLORE": 0.07416664704000003,
-    "REJECT": -0.31241903615999994
-  },
-  "('after_verify', 'many', False, 1, 'pass')": {
-    "REJECT": -1.031084881565044,
-    "ACCEPT": 0.9499830514336491
-  },
-  "('after_explore', 'zero', False, 0, 'unknown')": {
-    "EXPLORE": -0.028258352875639797,
-    "REJECT": -0.344955968417345,
-    "VERIFY": -0.3300039346705874
-  },
-  "('after_explore', 'many', False, 2, 'unknown')": {
-    "REJECT": -0.06999999999999999,
-    "VERIFY": 0.34551399680000006
-  },
-  "('after_verify', 'zero', False, 0, 'fail')": {
-    "ACCEPT": -0.61992,
-    "REJECT": -0.340148375815127
+    "VERIFY": 0.8049999999999995,
+    "REJECT": -0.34999988751433686,
+    "EXPLORE": 0.6744997869080464
   },
   "('after_verify', 'many', False, 0, 'pass')": {
-    "REJECT": -0.9090713856,
-    "ACCEPT": 0.9499999199626582
+    "ACCEPT": 0.9499999999999997,
+    "REJECT": -1.0499999881267879
+  },
+  "('after_explore', 'few', False, 0, 'unknown')": {
+    "REJECT": -0.3499999999999924,
+    "EXPLORE": 0.2578570992751266,
+    "VERIFY": 0.1424136493999132
+  },
+  "('after_explore', 'few', False, 1, 'unknown')": {
+    "VERIFY": -0.30376271810694516,
+    "REJECT": -0.34999999933600184,
+    "EXPLORE": 0.3542466773562396
+  },
+  "('after_verify', 'few', False, 1, 'fail')": {
+    "REJECT": -0.34999999999997683
+  },
+  "('after_explore', 'zero', False, 0, 'unknown')": {
+    "VERIFY": -0.36499999999983873,
+    "REJECT": -0.3499999999999995,
+    "EXPLORE": -0.029596022441197578
+  },
+  "('after_verify', 'zero', False, 0, 'fail')": {
+    "REJECT": -0.3499999999999951
+  },
+  "('after_explore', 'zero', True, 0, 'unknown')": {
+    "VERIFY": -0.36499999999983873,
+    "REJECT": -0.3499999999999951,
+    "EXPLORE": 0.0859843682403978
+  },
+  "('after_verify', 'zero', True, 0, 'fail')": {
+    "REJECT": -0.3499999999999951
+  },
+  "('after_verify', 'few', False, 0, 'pass')": {
+    "REJECT": -1.0498604310604427,
+    "ACCEPT": 0.9499999999999997
   },
   "('after_explore', 'zero', False, 1, 'unknown')": {
-    "REJECT": -0.344955968417345,
-    "VERIFY": -0.34435325831695907,
-    "EXPLORE": -0.345042552107968
-  },
-  "('after_verify', 'many', False, 2, 'pass')": {
-    "REJECT": -0.37800000000000006,
-    "ACCEPT": 0.75077056
+    "VERIFY": -0.3649995826263256,
+    "EXPLORE": -0.3649991024775975,
+    "REJECT": -0.34999999999999987
   },
   "('after_verify', 'zero', False, 1, 'fail')": {
-    "REJECT": -0.34369496052168125,
-    "ACCEPT": -0.7747488
+    "REJECT": -0.3499999764100466
+  },
+  "('after_explore', 'many', False, 1, 'unknown')": {
+    "VERIFY": 0.8049999999999995,
+    "EXPLORE": 0.6744996962195502,
+    "REJECT": -0.3499999999995791
+  },
+  "('after_verify', 'many', False, 1, 'pass')": {
+    "REJECT": -1.0499999999999854,
+    "ACCEPT": 0.9499999999999997
+  },
+  "('after_verify', 'few', False, 0, 'fail')": {
+    "REJECT": -0.34999999999999987
+  },
+  "('after_explore', 'many', False, 2, 'unknown')": {
+    "REJECT": -0.34741745582968064,
+    "VERIFY": 0.8049998887343309
   },
   "('after_explore', 'zero', False, 2, 'unknown')": {
-    "VERIFY": -0.34324035399720115,
-    "REJECT": -0.340148375815127
+    "VERIFY": -0.3600288970297446,
+    "REJECT": -0.34999991001146946
   },
   "('after_verify', 'zero', False, 2, 'fail')": {
-    "REJECT": -0.344955968417345,
-    "ACCEPT": -0.61992
+    "REJECT": -0.3493230015410158
+  },
+  "('after_explore', 'zero', True, 1, 'unknown')": {
+    "EXPLORE": -0.3649991804881613,
+    "VERIFY": -0.3649998545387939,
+    "REJECT": -0.34999999999999987
+  },
+  "('after_explore', 'zero', True, 2, 'unknown')": {
+    "VERIFY": -0.3589765271037701,
+    "REJECT": -0.34999988751433686
+  },
+  "('after_verify', 'zero', True, 2, 'fail')": {
+    "REJECT": -0.34915375192626974
+  },
+  "('after_verify', 'many', False, 2, 'pass')": {
+    "ACCEPT": 0.9499999737733638,
+    "REJECT": -1.042252367489042
+  },
+  "('after_verify', 'zero', True, 1, 'fail')": {
+    "REJECT": -0.349999992270044
+  },
+  "('after_explore', 'few', False, 2, 'unknown')": {
+    "REJECT": -0.34999996314069787,
+    "VERIFY": 0.4773553329091453
+  },
+  "('after_verify', 'few', False, 2, 'pass')": {
+    "REJECT": -1.0479690046230477,
+    "ACCEPT": 0.9499999999999997
+  },
+  "('after_verify', 'few', False, 1, 'pass')": {
+    "ACCEPT": 0.9499999985581753,
+    "REJECT": -1.026356101956305
+  },
+  "('after_verify', 'few', False, 2, 'fail')": {
+    "REJECT": -0.34999999999999987
   }
 }

@@ -1,15 +1,18 @@
 """
-Week 3: Orchestrator.
+Orchestrator — Planner -> Explorer -> Verifier -> Synthesizer.
 
-Sequential pipeline for now (Planner -> Explorer -> Verifier -> Synthesizer)
-— static, not learned. This deliberately mirrors the shape the RL router
-will eventually replace: the RL agent's job (later weeks) will be choosing
-which agent to call next and in what order; that decision here is just
-"always all four, in order." Keeping the interface stable now means the
-RL router slots in later without reshaping everything downstream of it.
+Two routing modes, selected at construction time:
+  use_rl_router=False (default): the original static sequence.
+  use_rl_router=True: each sub-question is driven by the trained RL router.
 
-Every step is wrapped so a single sub-question's failure doesn't take down
-the others — the trace records what happened at each step either way.
+If every sub-question the Planner produced is out of the graph's domain
+(requires_graph=False for all of them), the orchestrator returns a direct,
+honest "this isn't something I can look up in the patent graph" answer
+without ever calling the Explorer, Verifier, or Synthesizer LLM — there is
+nothing for any of them to usefully do with an out-of-domain question, so
+skipping them saves time and avoids the generic "couldn't find verified
+information" message, which wrongly implies a data gap rather than a
+question that was never answerable from this graph in the first place.
 """
 from src.agents.graph_explorer_agent import GraphExplorerAgent
 from src.agents.models import FinalAnswer, TraceStep
@@ -18,23 +21,35 @@ from src.agents.synthesizer_agent import SynthesizerAgent
 from src.agents.verifier_agent import VerifierAgent
 from src.graph.neo4j_client import Neo4jClient
 from src.llm.ollama_client import OllamaClient
+from src.rl.router import RLRouter
+from src import config
+
+OUT_OF_SCOPE_MESSAGE = (
+    "This doesn't look like a question about the patent data in the graph. "
+    "I can answer questions about patents, their inventors, applicants, "
+    "classification codes, and concepts mentioned in their titles — try "
+    "rephrasing around one of those."
+)
 
 
 class Orchestrator:
-    def __init__(self, llm_client: OllamaClient | None = None, neo4j_client: Neo4jClient | None = None):
+    def __init__(self, llm_client=None, neo4j_client=None, use_rl_router=False, q_table_path=None):
         llm_client = llm_client or OllamaClient()
         neo4j_client = neo4j_client or Neo4jClient()
-
         self.neo4j_client = neo4j_client
         self.planner = PlannerAgent(llm_client)
         self.explorer = GraphExplorerAgent(llm_client, neo4j_client)
         self.verifier = VerifierAgent(llm_client)
         self.synthesizer = SynthesizerAgent(llm_client)
+        self.use_rl_router = use_rl_router
+        self.rl_router = None
+        if use_rl_router:
+            default_q_path = str(config.ROOT_DIR / "data" / "rl" / "q_table.json")
+            self.rl_router = RLRouter(self.explorer, self.verifier, q_table_path=q_table_path or default_q_path)
 
     def answer(self, question: str) -> FinalAnswer:
         trace: list[TraceStep] = []
 
-        # --- Plan ---
         planner_output = self.planner.plan(question)
         trace.append(
             TraceStep(
@@ -45,7 +60,16 @@ class Orchestrator:
             )
         )
 
-        # --- Fetch schema once, reuse across all sub-questions this turn ---
+        graph_sub_questions = [sq for sq in planner_output.sub_questions if sq.requires_graph]
+        if not graph_sub_questions:
+            trace.append(
+                TraceStep(
+                    agent="Orchestrator",
+                    description="No sub-question needs the graph — answering directly without querying it.",
+                )
+            )
+            return FinalAnswer(answer=OUT_OF_SCOPE_MESSAGE, trace=trace, used_fallback=False)
+
         try:
             schema = self.neo4j_client.get_schema_summary()
         except Exception as e:
@@ -57,7 +81,6 @@ class Orchestrator:
                 used_fallback=True,
             )
 
-        # --- Explore + Verify each sub-question ---
         explorer_outputs = []
         verifications = []
         for sq in planner_output.sub_questions:
@@ -65,7 +88,14 @@ class Orchestrator:
                 trace.append(TraceStep(agent="Explorer", description=f"Skipped '{sq.text}' (no graph lookup needed)."))
                 continue
 
-            eo = self.explorer.explore(sq, schema)
+            if self.use_rl_router:
+                eo, v, action_trace = self.rl_router.route(sq, schema)
+                label = "learned" if self.rl_router.has_trained_policy else "default (untrained)"
+                trace.append(TraceStep(agent="RLRouter", description=f"Sub-question '{sq.text}': {label} policy took actions {action_trace}."))
+            else:
+                eo = self.explorer.explore(sq, schema)
+                v = self.verifier.verify(sq, eo)
+
             explorer_outputs.append(eo)
             trace.append(
                 TraceStep(
@@ -76,29 +106,12 @@ class Orchestrator:
                 )
             )
 
-            v = self.verifier.verify(sq, eo)
-            verifications.append(v)
-            trace.append(
-                TraceStep(
-                    agent="Verifier",
-                    description=f"Sub-question '{sq.text}': {'PASSED' if v.passed else 'FAILED'} — {v.reason}",
-                )
-            )
+            if v is not None:
+                verifications.append(v)
+                trace.append(TraceStep(agent="Verifier", description=f"Sub-question '{sq.text}': {'PASSED' if v.passed else 'FAILED'} — {v.reason}"))
 
-        # --- Synthesize ---
-        final = self.synthesizer.synthesize(
-            original_question=question,
-            sub_questions=planner_output.sub_questions,
-            explorer_outputs=explorer_outputs,
-            verifications=verifications,
-        )
-        trace.append(
-            TraceStep(
-                agent="Synthesizer",
-                description="Composed final answer." + (" (fallback used)" if final.used_fallback else ""),
-            )
-        )
-
+        final = self.synthesizer.synthesize(question, planner_output.sub_questions, explorer_outputs, verifications)
+        trace.append(TraceStep(agent="Synthesizer", description="Composed final answer." + (" (fallback used)" if final.used_fallback else "")))
         return FinalAnswer(answer=final.answer, trace=trace, used_fallback=final.used_fallback)
 
     def close(self):
